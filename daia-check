@@ -1,0 +1,55 @@
+#!/usr/bin/env perl
+use v5.14;
+use Test::More;
+use HTTP::Tiny;
+use Time::HiRes qw(usleep);
+use JSON;
+
+#
+# Überprüft ob der zentrale DAIA-Server für eine ausgewählte ISIL und PPN
+# mindestens ein Exemplar zurückliefert und dass dieses Exemplar explizit 
+# als verfügbar oder nicht verfügbar gekennzeichnet ist.
+#
+
+sub check {
+    my ($base, $id) = @_;
+
+    state $http = HTTP::Tiny->new( 
+        agent => 'daia-check',
+        default_headers => {
+            'Cache-control' => 'no-cache'
+        }
+    );
+    my $url = "$base?id=$id&format=json";
+    my $res = $http->get($url);
+
+    if ( ok($res->{success}, "$base?id=$id") ) {
+        my $item = eval {
+            decode_json($res->{content})->{document}->[0]->{item}->[0];
+        } || { };
+        ok( ($item->{available} or $item->{unavailable}), 
+            ' item available/unavailable');
+    }
+}
+
+if (@ARGV) {
+    # Manueller Test einer ISIL und PPN per Kommandozeile
+    my ($isil, $ppn) = @ARGV;
+    check("http://daia.gbv.de/isil/$isil","ppn:$ppn");
+} else { 
+    # Falls dieses Skript mit nagios zentral läuft könnte die Liste 
+    # der Testfälle auch von einem anderen Server geholt werden
+    open my $fh, "<", "daia-examples.csv";
+    my $line=0;
+    while (<$fh>) {
+        next unless $line++; # skip header
+        chomp;
+        my ($isil, $ppn) = split /[ \t,;]+/, $_;
+        next unless $isil and $ppn;
+        check("http://daia.gbv.de/isil/$isil","ppn:$ppn");
+        usleep(200000); # Warte 0.2 Sekunden
+    }
+}
+
+done_testing;
+
