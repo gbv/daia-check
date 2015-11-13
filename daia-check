@@ -1,6 +1,5 @@
 #!/usr/bin/env perl
 use v5.14;
-use Test::More;
 use HTTP::Tiny;
 use Time::HiRes qw(usleep);
 use Pod::Usage;
@@ -31,6 +30,11 @@ Base URL of DAIA Server. Set to C<http://daia.gbv.de/> by default.
 
 Read ISIL and PPN or full IDS from file or URL.
 
+=item --tap
+
+Show all tests in Test Anything Protocol (TAP) format. By default only failing
+tests are reported.
+
 =back
 
 =head1 EXAMPLES
@@ -42,10 +46,17 @@ Read ISIL and PPN or full IDS from file or URL.
 
 =cut
 
+my $errors = 0;
+my $tests = 0;
+my $tap;
 my $base = "http://daia.gbv.de/";
 my $from;
 
-GetOptions( "base=s" => \$base, "from=s" => \$from ) or pod2usage(2);
+GetOptions( 
+    "base=s" => \$base, 
+    "from=s" => \$from,
+    "tap!" => \$tap,
+) or pod2usage(2);
  
 if ($from) {
     # local CSV file
@@ -63,6 +74,23 @@ if ($from) {
     check($base, @ARGV);
 } else {
     pod2usage(2);
+}
+
+say "1..$tests # " . ($errors ? "failed $errors" : "ok");
+exit($errors ? 2 : 0);
+
+sub ok {
+    my ($ok, $msg) = @_;
+    $tests++;
+
+    if (!$ok) {
+        say "not ok $tests - $msg";
+        $errors++;
+    } elsif( $tap ) {
+        say "ok $tests - $msg";
+    }
+
+    return $ok;
 }
 
 sub get {
@@ -101,5 +129,3 @@ sub check {
             ' item available/unavailable');
     }
 }
-
-done_testing;
