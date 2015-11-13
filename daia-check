@@ -3,53 +3,103 @@ use v5.14;
 use Test::More;
 use HTTP::Tiny;
 use Time::HiRes qw(usleep);
+use Pod::Usage;
+use Getopt::Long;
 use JSON;
 
-#
-# Überprüft ob der zentrale DAIA-Server für eine ausgewählte ISIL und PPN
-# mindestens ein Exemplar zurückliefert und dass dieses Exemplar explizit 
-# als verfügbar oder nicht verfügbar gekennzeichnet ist.
-#
+=head1 USAGE
 
-sub check {
-    my ($base, $id) = @_;
+  daia-check [ OPTIONS ] [ ISIL PPN | ID ]
 
-    state $http = HTTP::Tiny->new( 
+Queries DAIA-Server with given ISIL and PPN or with a full identifier. Checks
+whether at least one item is contained in the DAIA response and whether this
+item is explicitly marked as available or unavailable. This catches most
+possible errors or incomplete DAIA responses.
+
+ISIL/PPN or full identifier can be passed via command line of given in a CSV
+file in local file system of at an URL.
+
+=head2 OPTIONS
+
+=over
+
+=item --base
+
+Base URL of DAIA Server. Set to C<http://daia.gbv.de/> by default.
+
+=item --from
+
+Read ISIL and PPN or full IDS from file or URL.
+
+=back
+
+=head1 EXAMPLES
+
+   daia-check DE-35 152766766
+   daia-check opac-de-35:ppn:152766766
+   daia-check --from daia-examples.csv
+   daia-check --from http://example.org/daia-examples.csv
+
+=cut
+
+my $base = "http://daia.gbv.de/";
+my $from;
+
+GetOptions( "base=s" => \$base, "from=s" => \$from ) or pod2usage(2);
+ 
+if ($from) {
+    # local CSV file
+    if (-f $from) {
+        open my $fh, "<", $from or die "failed to open $from\n";
+        check_csv(<$fh>);
+    } 
+    # CSV file from URL
+    else {
+        if (my $csv = get($from)) {
+            check_csv(split "\n", $csv);
+        }
+    }
+} elsif( @ARGV ) {
+    check($base, @ARGV);
+} else {
+    pod2usage(2);
+}
+
+sub get {
+    my $url = shift;
+    my $res = (state $http = HTTP::Tiny->new( 
         agent => 'daia-check',
         default_headers => {
             'Cache-control' => 'no-cache'
         }
-    );
-    my $url = "$base?id=$id&format=json";
-    my $res = $http->get($url);
+    ))->get($url);
+    return ok ($res->{success}, $url) ? $res->{content} : undef;
+}
+ 
+sub check_csv {
+    foreach my $line (@_) {
+        state $count = 0;
+        next unless $count++; # skip header
+        chomp $line;
+        my ($isil, $ppn) = split /[ \t,;]+/, $line;        
+        check( $base, $isil, $ppn );
+        usleep(200000); # wait 0.2 seconds
+    }
+}
 
-    if ( ok($res->{success}, "$base?id=$id") ) {
+sub check {
+    my ($base, $isil, $ppn) = @_;
+
+    # either ISIL and PPN or full id
+    my $id = $ppn ? do { $base .= "isil/$isil"; "ppn:$ppn"; } : $isil;
+
+    if (my $res = get("$base?id=$id&format=json")) {
         my $item = eval {
-            decode_json($res->{content})->{document}->[0]->{item}->[0];
+            decode_json($res)->{document}->[0]->{item}->[0];
         } || { };
         ok( ($item->{available} or $item->{unavailable}), 
             ' item available/unavailable');
     }
 }
 
-if (@ARGV) {
-    # Manueller Test einer ISIL und PPN per Kommandozeile
-    my ($isil, $ppn) = @ARGV;
-    check("http://daia.gbv.de/isil/$isil","ppn:$ppn");
-} else { 
-    # Falls dieses Skript mit nagios zentral läuft könnte die Liste 
-    # der Testfälle auch von einem anderen Server geholt werden
-    open my $fh, "<", "daia-examples.csv";
-    my $line=0;
-    while (<$fh>) {
-        next unless $line++; # skip header
-        chomp;
-        my ($isil, $ppn) = split /[ \t,;]+/, $_;
-        next unless $isil and $ppn;
-        check("http://daia.gbv.de/isil/$isil","ppn:$ppn");
-        usleep(200000); # Warte 0.2 Sekunden
-    }
-}
-
 done_testing;
-
