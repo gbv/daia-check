@@ -126,6 +126,6 @@ sub check {
             decode_json($res)->{document}->[0]->{item}->[0];
         } || { };
         ok( ($item->{available} or $item->{unavailable}), 
-            ' item available/unavailable');
+            "$base?id=$id item available/unavailable");
     }
 }
