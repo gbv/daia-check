@@ -6,3 +6,5 @@ verfügbar gekennzeichnet ist.
 
 Zusätzlich kann überprüft werden, ob alle OPACs aus dem
 GBV-Datenbankverzeichnis mit mindestens einer Beispiel-PPN getestet werden.
+
+[![Status bei Travis-CI](https://travis-ci.org/gbv/daia-check.svg?branch=master)](https://travis-ci.org/gbv/daia-check)

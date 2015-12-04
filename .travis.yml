@@ -1,0 +1,8 @@
+language: perl
+perl:
+    - 5.14
+install:
+    - cpanm --quiet --notest --skip-satisfied --installdeps .
+script: 
+    - ./daia-check --from daia-examples.csv --tap
+    - ./daia-check --from daia-examples.csv --coverage --code 0

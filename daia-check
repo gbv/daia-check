@@ -71,7 +71,7 @@ GetOptions(
     "from=s"   => \$from,
     "coverage" => \$coverage,
     "tap!"     => \$tap,
-    "code=d"  => \$code;
+    "code=i"  => \$code,
 ) or pod2usage(2);
 
 if ($from) {
