@@ -3,3 +3,6 @@ für alle in der Datei `daia-examples.csv` aufgeführten ISIL und PPN eine
 Abfrage durchführt. Dabei wird getestet, ob mindestens ein Exemplar
 zurückliefert wird und ob dieses Exemplar explizit als verfügbar oder nicht
 verfügbar gekennzeichnet ist.
+
+Zusätzlich kann überprüft werden, ob alle OPACs aus dem
+GBV-Datenbankverzeichnis mit mindestens einer Beispiel-PPN getestet werden.

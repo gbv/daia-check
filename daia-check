@@ -22,13 +22,24 @@ file in local file system of at an URL.
 
 =over
 
-=item --base
+=item --base URL
 
 Base URL of DAIA Server. Set to C<http://daia.gbv.de/> by default.
 
-=item --from
+=item --from FILE-OR-URL
 
 Read ISIL and PPN or full IDS from file or URL.
+
+=item --coverage
+
+Read OPAC database group from C<http://uri.gbv.de/database/opac> and check
+whether all databases listed there are covered by at least one ISIL & PPN test.
+Requires option C<--from>.
+
+=item --code NUMBER
+
+Which exit code to return on errors. Set to 2 by default. Use 0 to avoid an
+error code.
 
 =item --tap
 
@@ -43,50 +54,66 @@ tests are reported.
    daia-check opac-de-35:ppn:152766766
    daia-check --from daia-examples.csv
    daia-check --from http://example.org/daia-examples.csv
+   daia-check --from daia-examples.csv --coverage --code 0
 
 =cut
 
 my $errors = 0;
-my $tests = 0;
+my $code = 2;
+my $tests  = 0;
 my $tap;
 my $base = "http://daia.gbv.de/";
 my $from;
+my $coverage;
 
-GetOptions( 
-    "base=s" => \$base, 
-    "from=s" => \$from,
-    "tap!" => \$tap,
+GetOptions(
+    "base=s"   => \$base,
+    "from=s"   => \$from,
+    "coverage" => \$coverage,
+    "tap!"     => \$tap,
+    "code=d"  => \$code;
 ) or pod2usage(2);
- 
+
 if ($from) {
+    my @tests;
+
     # local CSV file
-    if (-f $from) {
+    if ( -f $from ) {
         open my $fh, "<", $from or die "failed to open $from\n";
-        check_csv(<$fh>);
-    } 
-    # CSV file from URL
-    else {
-        if (my $csv = get($from)) {
-            check_csv(split "\n", $csv);
-        }
+        @tests = <$fh>;
     }
-} elsif( @ARGV ) {
-    check($base, @ARGV);
-} else {
+
+    # CSV file from URL
+    elsif ( my $csv = get($from) ) {
+        @tests = split "\n", $csv;
+    }
+
+    if ($coverage) {
+        check_coverage( \@tests );
+    }
+    else {
+        check_all( \@tests );
+    }
+}
+elsif (@ARGV) {
+    check( $base, @ARGV );
+}
+else {
     pod2usage(2);
 }
 
-say "1..$tests # " . ($errors ? "failed $errors" : "ok");
-exit($errors ? 2 : 0);
+say "1..$tests # " . ( $errors ? "failed $errors" : "ok" ) if $tap;
+exit( $errors ? $code : 0 );
 
 sub ok {
-    my ($ok, $msg) = @_;
+    my ( $ok, $msg ) = @_;
     $tests++;
 
-    if (!$ok) {
+    if ( !$ok ) {
         say "not ok $tests - $msg";
         $errors++;
-    } elsif( $tap ) {
+    }
+    elsif ($tap) {
         say "ok $tests - $msg";
     }
 
@@ -95,37 +122,72 @@ sub ok {
 
 sub get {
     my $url = shift;
-    my $res = (state $http = HTTP::Tiny->new( 
-        agent => 'daia-check',
-        default_headers => {
-            'Cache-control' => 'no-cache'
-        }
-    ))->get($url);
-    return ok ($res->{success}, $url) ? $res->{content} : undef;
+    my $res = (
+        state $http = HTTP::Tiny->new(
+            agent           => 'daia-check',
+            default_headers => {
+                'Cache-control' => 'no-cache'
+            }
+        )
+    )->get($url);
+    return ok( $res->{success}, $url ) ? $res->{content} : undef;
 }
- 
-sub check_csv {
-    foreach my $line (@_) {
+
+sub read_csv {
+    my ( $lines, $callback ) = @_;
+    foreach my $line (@$lines) {
         state $count = 0;
-        next unless $count++; # skip header
+        next unless $count++;    # skip header
         chomp $line;
-        my ($isil, $ppn) = split /[ \t,;]+/, $line;        
-        check( $base, $isil, $ppn );
-        usleep(200000); # wait 0.2 seconds
+        my ( $isil, $ppn ) = split /[ \t,;]+/, $line;
+        $callback->( $isil, $ppn );
     }
 }
 
+sub check_coverage {
+    my $url   = "http://uri.gbv.de/database/opac?format=jsonld";
+    my $opacs = eval { decode_json( get($url) )->{subjectOf} };
+    my %isil  = (
+        map {
+            $_ =~ qr{^http://uri.gbv.de/database/opac-de-(.+)$}
+              ? ( "DE-" . ucfirst($1) => 1 )
+              : ();
+        } @$opacs
+    );
+
+    read_csv(
+        $_[0],
+        sub {
+            delete $isil{ $_[0] } or return;
+            ok( 1, "$_[0] covered" );
+        }
+    );
+    ok( 0, "$_ covered" ) for sort keys %isil;
+}
+
+sub check_all {
+    read_csv(
+        $_[0],
+        sub {
+            my ( $isil, $ppn ) = @_;
+            check( $base, $isil, $ppn );
+            usleep(200000);    # wait 0.2 seconds
+        }
+    );
+}
+
 sub check {
-    my ($base, $isil, $ppn) = @_;
+    my ( $base, $isil, $ppn ) = @_;
 
     # either ISIL and PPN or full id
     my $id = $ppn ? do { $base .= "isil/$isil"; "ppn:$ppn"; } : $isil;
 
-    if (my $res = get("$base?id=$id&format=json")) {
-        my $item = eval {
-            decode_json($res)->{document}->[0]->{item}->[0];
-        } || { };
-        ok( ($item->{available} or $item->{unavailable}), 
-            "$base?id=$id item available/unavailable");
+    if ( my $res = get("$base?id=$id&format=json") ) {
+        my $item =
+          eval { decode_json($res)->{document}->[0]->{item}->[0]; } || {};
+        ok(
+            ( $item->{available} or $item->{unavailable} ),
+            "$base?id=$id item available/unavailable"
+        );
     }
 }
